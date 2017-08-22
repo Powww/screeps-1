@@ -48,6 +48,8 @@ module.exports = {
 	},
 
 	surveyRoom: function(rmColony) {
+		let __Colony = require("util.colony");
+
 		let visible = _.keys(Game.rooms).includes(rmColony);
 		_.set(Memory, ["rooms", rmColony, "has_minerals"],
 			visible ? Game.rooms[rmColony].find(FIND_MINERALS, {filter: (m) => { return m.mineralAmount > 0; }}).length > 0 : false);
@@ -59,17 +61,29 @@ module.exports = {
 		let isSafe = !visible || amountHostiles == 0;
 		_.set(Memory, ["rooms", rmColony, "is_safe"], isSafe);
 		_.set(Memory, ["rooms", rmColony, "amount_hostiles"], amountHostiles);
+
+		let storage = _.get(Game, ["rooms", rmColony, "storage"]);
+		_.set(Memory, ["rooms", rmColony, "critical_energy"], 
+			(storage != null && storage.store["energy"] < (__Colony.getCriticalStockpile(_.get(Game, ["rooms", rmColony, "controller", "level"])) * 0.9)));
+		
+		let ticks_downgrade = _.get(Game, ["rooms", rmColony, "controller", "ticksToDowngrade"]);
+		_.set(Memory, ["rooms", rmColony, "critical_downgrade"], (ticks_downgrade > 0 && ticks_downgrade < 3500))
 	},
 
 	runPopulation: function(rmColony, listCreeps, listSpawnRooms, listPopulation) {
 		let roomLvl = _.get(Game, ["rooms", rmColony, "controller", "level"]);
+
+		let is_safe = _.get(Memory, ["rooms", rmColony, "is_safe"]);
+		let critical_energy = _.get(Memory, ["rooms", rmColony, "critical_energy"])
+		let critical_downgrade = _.get(Memory, ["rooms", rmColony, "critical_downgrade"]);
+
 		let lWorker = _.filter(listCreeps, c => c.memory.role == "worker" && c.memory.subrole == null);
 		let lRepairer = _.filter(listCreeps, c => c.memory.role == "worker" && c.memory.subrole == "repairer");
 		let lUpgrader = _.filter(listCreeps, c => c.memory.role == "worker" && c.memory.subrole == "upgrader");
 		let lSoldier = _.filter(listCreeps, c => c.memory.role == "soldier");
 
 		if (listPopulation == null)
-			listPopulation = Population_Colony[listSpawnRooms == null ? "Standalone" : "Assisted"][Game.rooms[rmColony].controller.level];
+			listPopulation = Population_Colony[listSpawnRooms == null ? "Standalone" : "Assisted"][Game.rooms[rmColony].controller.level];	
 
 		let popTarget =
 			(listPopulation["worker"] == null ? 0 : listPopulation["worker"]["amount"])
@@ -85,7 +99,8 @@ module.exports = {
 					level: (listPopulation["soldier"] == null ? 8 : listPopulation["soldier"]["level"]),
 					scale_level: listPopulation["soldier"] == null ? true : listPopulation["soldier"]["scale_level"],
 					body: "soldier", name: null, args: {role: "soldier", room: rmColony} });
-		} else if (listPopulation["worker"] != null && lWorker.length < listPopulation["worker"]["amount"]) {
+		} else if ((is_safe && !critical_energy)
+			&& (listPopulation["worker"] != null && lWorker.length < listPopulation["worker"]["amount"])) {
 				Memory["hive"]["spawn_requests"].push({ room: rmColony, listRooms: listSpawnRooms, priority: 3, level: listPopulation["worker"]["level"],
 					scale_level: listPopulation["worker"] == null ? true : listPopulation["worker"]["scale_level"],
 					body: (listPopulation["worker"]["body"] || "worker"),
@@ -95,8 +110,8 @@ module.exports = {
 					scale_level: listPopulation["repairer"] == null ? true : listPopulation["repairer"]["scale_level"],
 					body: (listPopulation["repairer"]["body"] || "worker"),
 					name: null, args: {role: "worker", subrole: "repairer", room: rmColony} });
-		} else if (_.get(Memory, ["hive", "pulses", "pause_upgrading", rmColony]) == null
-					&& listPopulation["upgrader"] != null && lUpgrader.length < listPopulation["upgrader"]["amount"]) {
+		} else if ((_.get(Memory, ["hive", "pulses", "pause_upgrading", rmColony]) == null && ((is_safe && !critical_energy) || critical_downgrade))
+					&& (listPopulation["upgrader"] != null && lUpgrader.length < listPopulation["upgrader"]["amount"])) {
 				Memory["hive"]["spawn_requests"].push({ room: rmColony, listRooms: listSpawnRooms, priority: 4, level: listPopulation["upgrader"]["level"],
 					scale_level: listPopulation["upgrader"] == null ? true : listPopulation["upgrader"]["scale_level"],
 					body: (listPopulation["upgrader"]["body"] || "worker"),
@@ -149,7 +164,8 @@ module.exports = {
 		if (target == null || Game.time % 15 == 0) {
 			let base_structures = _.filter(Game.rooms[rmColony].find(FIND_STRUCTURES),
 				s => { return s.structureType != "link" && s.structureType != "container" 
-						&& s.structureType != "extractor" && s.structureType != "controller"; });
+						&& s.structureType != "extractor" && s.structureType != "controller"
+						&& s.structureType != "road"; });
 			let spawns = _.filter(base_structures, s => { return s.structureType == "spawn"; });
 			
 			// Find the center of base by averaging position of all spawns
@@ -162,14 +178,14 @@ module.exports = {
 			originY /= spawns.length;
 
 			let my_creeps = Game.rooms[rmColony].find(FIND_MY_CREEPS);
-			// Only attack creeps that are 1) not allies and 2) within 10 sq of base structures
+			// Only attack creeps that are 1) not allies and 2) within 10 sq of base structures (or Invader within 5 sq of creeps)
 			// Then sort by 1) if they have heal parts, and 2) sort by distance (attack closest)
-			target = _.head(_.sortBy(_.sortBy(_.filter(_.filter(Game.rooms[rmColony].find(FIND_HOSTILE_CREEPS),
-				c => { return _.get(Memory, ["hive", "allies"]).indexOf(c.owner.username) < 0; }),
-				c => { return c.pos.inRangeToListTargets(base_structures, 10) || c.pos.inRangeToListTargets(my_creeps, 4); }),
-				c => { return -c.getActiveBodyparts(HEAL); }),
-				c => { return new RoomPosition(originX, originY, rmColony).getRangeTo(c.pos.x, c.pos.y); }));
-
+			target = _.head(_.sortBy(_.filter(Game.rooms[rmColony].find(FIND_HOSTILE_CREEPS),
+				c => { return !c.isAlly() && (c.pos.inRangeToListTargets(base_structures, 10) 
+						|| (c.owner.username == "Invader" && c.pos.inRangeToListTargets(my_creeps, 3))); }),
+				c => { return (c.getActiveBodyparts(HEAL) > 0
+					? -100 + new RoomPosition(originX, originY, rmColony).getRangeTo(c.pos.x, c.pos.y)
+					: new RoomPosition(originX, originY, rmColony).getRangeTo(c.pos.x, c.pos.y)); }));
 			_.set(Memory, ["rooms", rmColony, "towers", "target_attack"], (target == null ? null : target.id));
 		}
 	},

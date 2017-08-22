@@ -72,6 +72,12 @@ module.exports = {
 	},
 
 	runPopulation: function(rmColony, rmHarvest, listCreeps, listSpawnRooms, hasKeepers, listPopulation) {
+		if (rmColony != rmHarvest
+				&& (_.get(Memory, ["hive", "pulses", "pause_remote-mining", rmColony]) != null 
+				|| _.get(Memory, ["hive", "pulses", "pause_remote-mining", rmHarvest]) != null)) {			
+			return;
+		}
+
 		let hasMinerals = _.get(Memory, ["rooms", rmColony, `mining_${rmHarvest}`, "has_minerals"]);
 		let isSafe = _.get(Memory, ["rooms", rmColony, `mining_${rmHarvest}`, "is_safe"]);
 		let isVisible = _.get(Memory, ["rooms", rmColony, `mining_${rmHarvest}`, "visible"]);
@@ -94,7 +100,7 @@ module.exports = {
 				listPopulation = (isVisible && _.get(Game, ["rooms", rmHarvest]) != null)
 			        ? Population_Mining[`R${Game.rooms[rmHarvest].find(FIND_SOURCES).length}`][Game.rooms[rmColony].controller.level]
 			        : Population_Mining["R1"][Game.rooms[rmColony].controller.level];
-		}
+		}		
 
         let popTarget =
               (listPopulation["paladin"] == null ? 0 : listPopulation["paladin"]["amount"])

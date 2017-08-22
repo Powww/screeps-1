@@ -2,14 +2,28 @@
 - invade(), occupy()
 - invasion(toOccupy) -> occupation
 - all sites()
+... test critical_downgrade on private server?
 
 
 
 # Implementing...
-- Log to show all boosts in action... or add to log.labs()
-- Implement tower repairing?
-	- If not attacking or healing...
-	- Check structures if (Game.time % 25 == 0)
+labs.pause_reactions();
+Siege
+- Add "scout"; 1 MOVE, if a room is not visible (remote mining), will go to ensure doesn't need soldiers, etc (doesn't waste bigger crep body, spawn time)
+
+
+Industry
+	* when defining reactions, splice out labs already defined in boosts!!!!!!! but not empty...
+	- @ sites.industry() line ~141: if no reaction available to be assigned, check if any labs need emptying
+		- and empty them!
+	- refactor industry functions; Refactor industry... write out steps for industry and try to refactor to it
+	- In defining labs, if no reaction or boost, if not empty, then empty
+
+Misc
+	- Log to show all boosts in action... or add to log.labs()
+	- Implement tower repairing?
+		- If not attacking or healing...
+		- Check structures if (Game.time % 25 == 0)
 
 
 
@@ -48,6 +62,9 @@
 
 - Code Standardization
 	? Change all "listRoute" in Memory objects to "route" e.g. colonize()
+
+- Memory Optimization
+	- Delete old remote mining data from Memory.rooms... Memory.rooms.rmName.mining-name
 
 - CPU Optimization
 	- Replace _.filter(room.find(list)) with room.find(list, {filter: ()}) 
